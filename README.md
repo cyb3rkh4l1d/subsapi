@@ -12,8 +12,8 @@ SubsAPI is a subscription management API built with Go (Golang), Gin, and GORM, 
 - Dockerized for easy setup
 
 
-
-# INSTALLATION
+# API Endpoints
+# Deployment
 
 1. Clone the repository:
 
@@ -28,7 +28,7 @@ cd subsapi
 
 ```bash
 
-mv env.example .env
+mv .env.example .env
 
 ```
 
@@ -52,7 +52,7 @@ GIN_MODE=release
 
 ```bash
 
-sudo docker-compose --env-file .env -f deployment/docker-compose.yaml up --build
+sudo docker compose --env-file .env -f deployment/docker-compose.yaml up --build
 ```
 
 # API Endpoints
