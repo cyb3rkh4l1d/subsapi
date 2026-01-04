@@ -17,28 +17,79 @@ const docTemplate = `{
     "paths": {
         "/subscriptions": {
             "get": {
-                "description": "Retrieve all subscriptions",
+                "description": "Retrieve paginated list of subscriptions with optional sorting",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Subscriptions"
                 ],
-                "summary": "List all subscriptions",
+                "summary": "List subscriptions with pagination",
+                "parameters": [
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Maximum number of items to return",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Number of items to skip",
+                        "name": "offset",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "id",
+                            "user_id",
+                            "service_name",
+                            "price",
+                            "start_date",
+                            "end_date"
+                        ],
+                        "type": "string",
+                        "default": "id",
+                        "description": "Field to sort by",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "default": "desc",
+                        "description": "Sort order",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handlers.SubscriptionResponse"
-                            }
+                            "$ref": "#/definitions/models.ListSubscriptionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request - Invalid query parameters",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
@@ -62,7 +113,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.createSubReq"
+                            "$ref": "#/definitions/models.CreateSubscriptionRequest"
                         }
                     }
                 ],
@@ -70,37 +121,41 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SubscriptionResponse"
+                            "$ref": "#/definitions/models.SubscriptionResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/subscriptions/stats": {
+        "/subscriptions/summary": {
             "get": {
-                "description": "Calculate total cost for a user within a period",
+                "description": "Calculate subscription statistics including total cost, unique months, and count for a user",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Subscriptions"
                 ],
-                "summary": "Calculate total subscription cost",
+                "summary": "Get user subscription summary",
                 "parameters": [
                     {
                         "type": "string",
+                        "format": "uuid",
                         "description": "User UUID",
                         "name": "user_id",
                         "in": "query",
@@ -108,40 +163,41 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Start period (MM-YYYY)",
+                        "description": "Filter by service name",
+                        "name": "service_name",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (MM-YYYY)",
                         "name": "from",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "End period (MM-YYYY)",
+                        "description": "End date (MM-YYYY)",
                         "name": "to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Service name filter",
-                        "name": "service_name",
                         "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "Response for static",
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.StatsResponse"
+                            "$ref": "#/definitions/models.UserSubscriptionSummaryResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad Request - Invalid parameters",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
@@ -150,6 +206,9 @@ const docTemplate = `{
         "/subscriptions/{id}": {
             "get": {
                 "description": "Retrieve a subscription using its ID",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -159,6 +218,7 @@ const docTemplate = `{
                 "summary": "Get subscription by ID",
                 "parameters": [
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "description": "Subscription ID",
                         "name": "id",
@@ -170,31 +230,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SubscriptionResponse"
+                            "$ref": "#/definitions/models.SubscriptionResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad Request - Invalid subscription ID",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Not Found - Subscription does not exist",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
             },
             "put": {
-                "description": "Update subscription fields by ID",
+                "description": "Partially update subscription fields by ID (only provided fields are modified)",
                 "consumes": [
                     "application/json"
                 ],
@@ -207,6 +267,7 @@ const docTemplate = `{
                 "summary": "Update subscription",
                 "parameters": [
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "description": "Subscription ID",
                         "name": "id",
@@ -214,12 +275,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Update payload",
+                        "description": "Update payload (partial update)",
                         "name": "subscription",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.updateSubReq"
+                            "$ref": "#/definitions/models.UpdateSubscriptionRequest"
                         }
                     }
                 ],
@@ -227,37 +288,44 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.SubscriptionResponse"
+                            "$ref": "#/definitions/models.SubscriptionResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad Request - Invalid input or validation failed",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Not Found - Subscription does not exist",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
             },
             "delete": {
-                "description": "Delete subscription by ID",
+                "description": "Permanently delete a subscription by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "Subscriptions"
                 ],
                 "summary": "Delete subscription",
                 "parameters": [
                     {
+                        "minimum": 1,
                         "type": "integer",
                         "description": "Subscription ID",
                         "name": "id",
@@ -267,18 +335,24 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "204": {
-                        "description": "No Content"
+                        "description": "No Content - Subscription successfully deleted"
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad Request - Invalid subscription ID",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found - Subscription does not exist",
+                        "schema": {
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/models.ErrorResponse"
                         }
                     }
                 }
@@ -286,28 +360,83 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "handlers.ErrorResponse": {
+        "models.CreateSubscriptionRequest": {
+            "description": "Defines the request body for creating a new subscription.",
+            "type": "object",
+            "required": [
+                "price",
+                "service_name",
+                "start_date",
+                "user_id"
+            ],
+            "properties": {
+                "end_date": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
+                },
+                "service_name": {
+                    "type": "string",
+                    "maxLength": 15
+                },
+                "start_date": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ErrorResponse": {
             "description": "Defines the generic error",
             "type": "object",
             "properties": {
+                "details": {
+                    "type": "string"
+                },
                 "error": {
                     "type": "string"
                 }
             }
         },
-        "handlers.StatsResponse": {
-            "description": "Defines the API response structure for /stats endpoint.",
+        "models.ListSubscriptionsResponse": {
+            "description": "Defines the API response structure for a ListSubscriptionRequest.",
             "type": "object",
             "properties": {
-                "count": {
+                "meta": {
+                    "$ref": "#/definitions/models.PaginationMeta"
+                },
+                "subscriptions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SubscriptionResponse"
+                    }
+                }
+            }
+        },
+        "models.PaginationMeta": {
+            "description": "Defines pagination metadata for response for ListSubscriptionResponse",
+            "type": "object",
+            "properties": {
+                "limit": {
                     "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "order": {
+                    "type": "string"
+                },
+                "sort_by": {
+                    "type": "string"
                 },
                 "total": {
                     "type": "integer"
                 }
             }
         },
-        "handlers.SubscriptionResponse": {
+        "models.SubscriptionResponse": {
             "description": "Defines the API response structure for a subscription.",
             "type": "object",
             "properties": {
@@ -331,34 +460,7 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.createSubReq": {
-            "description": "Defines the request body for creating a new subscription.",
-            "type": "object",
-            "required": [
-                "price",
-                "service_name",
-                "start_date",
-                "user_id"
-            ],
-            "properties": {
-                "end_date": {
-                    "type": "string"
-                },
-                "price": {
-                    "type": "integer"
-                },
-                "service_name": {
-                    "type": "string"
-                },
-                "start_date": {
-                    "type": "string"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.updateSubReq": {
+        "models.UpdateSubscriptionRequest": {
             "description": "Defines the request body for updating a subscription.",
             "type": "object",
             "properties": {
@@ -369,9 +471,31 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "service_name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 15
                 },
                 "start_date": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.UserSubscriptionSummaryResponse": {
+            "description": "Defines the structure of the API response for the /summary endpoint.",
+            "type": "object",
+            "properties": {
+                "service_name": {
+                    "type": "string"
+                },
+                "total_amount": {
+                    "type": "integer"
+                },
+                "total_months": {
+                    "type": "integer"
+                },
+                "unit_price": {
+                    "type": "integer"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }

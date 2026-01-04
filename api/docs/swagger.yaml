@@ -1,20 +1,58 @@
 basePath: /api/v1
 definitions:
-  handlers.ErrorResponse:
+  models.CreateSubscriptionRequest:
+    description: Defines the request body for creating a new subscription.
+    properties:
+      end_date:
+        type: string
+      price:
+        type: integer
+      service_name:
+        maxLength: 15
+        type: string
+      start_date:
+        type: string
+      user_id:
+        type: string
+    required:
+    - price
+    - service_name
+    - start_date
+    - user_id
+    type: object
+  models.ErrorResponse:
     description: Defines the generic error
     properties:
+      details:
+        type: string
       error:
         type: string
     type: object
-  handlers.StatsResponse:
-    description: Defines the API response structure for /stats endpoint.
+  models.ListSubscriptionsResponse:
+    description: Defines the API response structure for a ListSubscriptionRequest.
     properties:
-      count:
+      meta:
+        $ref: '#/definitions/models.PaginationMeta'
+      subscriptions:
+        items:
+          $ref: '#/definitions/models.SubscriptionResponse'
+        type: array
+    type: object
+  models.PaginationMeta:
+    description: Defines pagination metadata for response for ListSubscriptionResponse
+    properties:
+      limit:
         type: integer
+      offset:
+        type: integer
+      order:
+        type: string
+      sort_by:
+        type: string
       total:
         type: integer
     type: object
-  handlers.SubscriptionResponse:
+  models.SubscriptionResponse:
     description: Defines the API response structure for a subscription.
     properties:
       end_date:
@@ -30,26 +68,7 @@ definitions:
       user_id:
         type: string
     type: object
-  handlers.createSubReq:
-    description: Defines the request body for creating a new subscription.
-    properties:
-      end_date:
-        type: string
-      price:
-        type: integer
-      service_name:
-        type: string
-      start_date:
-        type: string
-      user_id:
-        type: string
-    required:
-    - price
-    - service_name
-    - start_date
-    - user_id
-    type: object
-  handlers.updateSubReq:
+  models.UpdateSubscriptionRequest:
     description: Defines the request body for updating a subscription.
     properties:
       end_date:
@@ -57,8 +76,23 @@ definitions:
       price:
         type: integer
       service_name:
+        maxLength: 15
         type: string
       start_date:
+        type: string
+    type: object
+  models.UserSubscriptionSummaryResponse:
+    description: Defines the structure of the API response for the /summary endpoint.
+    properties:
+      service_name:
+        type: string
+      total_amount:
+        type: integer
+      total_months:
+        type: integer
+      unit_price:
+        type: integer
+      user_id:
         type: string
     type: object
 host: localhost:8080
@@ -70,21 +104,59 @@ info:
 paths:
   /subscriptions:
     get:
-      description: Retrieve all subscriptions
+      consumes:
+      - application/json
+      description: Retrieve paginated list of subscriptions with optional sorting
+      parameters:
+      - default: 10
+        description: Maximum number of items to return
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      - default: 0
+        description: Number of items to skip
+        in: query
+        minimum: 0
+        name: offset
+        type: integer
+      - default: id
+        description: Field to sort by
+        enum:
+        - id
+        - user_id
+        - service_name
+        - price
+        - start_date
+        - end_date
+        in: query
+        name: sort_by
+        type: string
+      - default: desc
+        description: Sort order
+        enum:
+        - asc
+        - desc
+        in: query
+        name: order
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/handlers.SubscriptionResponse'
-            type: array
+            $ref: '#/definitions/models.ListSubscriptionsResponse'
+        "400":
+          description: Bad Request - Invalid query parameters
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List all subscriptions
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: List subscriptions with pagination
       tags:
       - Subscriptions
     post:
@@ -97,53 +169,65 @@ paths:
         name: subscription
         required: true
         schema:
-          $ref: '#/definitions/handlers.createSubReq'
+          $ref: '#/definitions/models.CreateSubscriptionRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/handlers.SubscriptionResponse'
+            $ref: '#/definitions/models.SubscriptionResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
       summary: Create a new subscription
       tags:
       - Subscriptions
   /subscriptions/{id}:
     delete:
-      description: Delete subscription by ID
+      consumes:
+      - application/json
+      description: Permanently delete a subscription by ID
       parameters:
       - description: Subscription ID
         in: path
+        minimum: 1
         name: id
         required: true
         type: integer
+      produces:
+      - application/json
       responses:
         "204":
-          description: No Content
+          description: No Content - Subscription successfully deleted
         "400":
-          description: Bad Request
+          description: Bad Request - Invalid subscription ID
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found - Subscription does not exist
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
       summary: Delete subscription
       tags:
       - Subscriptions
     get:
+      consumes:
+      - application/json
       description: Retrieve a subscription using its ID
       parameters:
       - description: Subscription ID
         in: path
+        minimum: 1
         name: id
         required: true
         type: integer
@@ -153,97 +237,104 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionResponse'
+            $ref: '#/definitions/models.SubscriptionResponse'
         "400":
-          description: Bad Request
+          description: Bad Request - Invalid subscription ID
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
         "404":
-          description: Not Found
+          description: Not Found - Subscription does not exist
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
       summary: Get subscription by ID
       tags:
       - Subscriptions
     put:
       consumes:
       - application/json
-      description: Update subscription fields by ID
+      description: Partially update subscription fields by ID (only provided fields
+        are modified)
       parameters:
       - description: Subscription ID
         in: path
+        minimum: 1
         name: id
         required: true
         type: integer
-      - description: Update payload
+      - description: Update payload (partial update)
         in: body
         name: subscription
         required: true
         schema:
-          $ref: '#/definitions/handlers.updateSubReq'
+          $ref: '#/definitions/models.UpdateSubscriptionRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionResponse'
+            $ref: '#/definitions/models.SubscriptionResponse'
         "400":
-          description: Bad Request
+          description: Bad Request - Invalid input or validation failed
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
         "404":
-          description: Not Found
+          description: Not Found - Subscription does not exist
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
       summary: Update subscription
       tags:
       - Subscriptions
-  /subscriptions/stats:
+  /subscriptions/summary:
     get:
-      description: Calculate total cost for a user within a period
+      consumes:
+      - application/json
+      description: Calculate subscription statistics including total cost, unique
+        months, and count for a user
       parameters:
       - description: User UUID
+        format: uuid
         in: query
         name: user_id
         required: true
         type: string
-      - description: Start period (MM-YYYY)
+      - description: Filter by service name
+        in: query
+        name: service_name
+        required: true
+        type: string
+      - description: Start date (MM-YYYY)
         in: query
         name: from
         type: string
-      - description: End period (MM-YYYY)
+      - description: End date (MM-YYYY)
         in: query
         name: to
-        type: string
-      - description: Service name filter
-        in: query
-        name: service_name
         type: string
       produces:
       - application/json
       responses:
         "200":
-          description: Response for static
+          description: OK
           schema:
-            $ref: '#/definitions/handlers.StatsResponse'
+            $ref: '#/definitions/models.UserSubscriptionSummaryResponse'
         "400":
-          description: Bad Request
+          description: Bad Request - Invalid parameters
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/models.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Calculate total subscription cost
+            $ref: '#/definitions/models.ErrorResponse'
+      summary: Get user subscription summary
       tags:
       - Subscriptions
 swagger: "2.0"

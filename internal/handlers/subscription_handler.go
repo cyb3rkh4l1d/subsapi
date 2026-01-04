@@ -5,8 +5,7 @@ import (
 	"net/http"
 
 	"github.com/cyb3rkh4l1d/subsapi/internal/models"
-	"github.com/cyb3rkh4l1d/subsapi/internal/repository"
-	"github.com/cyb3rkh4l1d/subsapi/internal/utils"
+	"github.com/cyb3rkh4l1d/subsapi/internal/service"
 	"github.com/cyb3rkh4l1d/subsapi/internal/validations"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -14,51 +13,12 @@ import (
 
 // SubscriptionHandler handles HTTP requests related to subscriptions.
 // It contains shared context, logger, and repository dependencies.
-
+// SubscriptionHandler обрабатывает HTTP-запросы, связанные с подписками.
+// Он содержит зависимости от общего контекста, логгера и репозитория.
 type SubscriptionHandler struct {
-	ctx           context.Context
-	Logger        *logrus.Entry
-	SubRepository *repository.SubscriptionRepository
-}
-
-// @Description Defines the request body for creating a new subscription.
-type createSubReq struct {
-	ServiceName string  `json:"service_name" binding:"required"`
-	Price       int     `json:"price" binding:"required,gt=0"`
-	UserID      string  `json:"user_id" binding:"required"`
-	StartDate   string  `json:"start_date" binding:"required"`
-	EndDate     *string `json:"end_date,omitempty"`
-}
-
-// @Description Defines the request body for updating a subscription.
-type updateSubReq struct {
-	ServiceName *string `json:"service_name,omitempty"`
-	Price       *int    `json:"price,omitempty" binding:"gt=0"`
-	StartDate   *string `json:"start_date,omitempty"`
-	EndDate     *string `json:"end_date,omitempty"`
-}
-
-// @Description Defines the API response structure for a subscription.
-type SubscriptionResponse struct {
-	ID          int    `json:"service_id"`
-	ServiceName string `json:"service_name"`
-	Price       int    `json:"price"`
-	UserID      string `json:"user_id"`
-	StartDate   string `json:"start_date"`
-	EndDate     string `json:"end_date,omitempty"`
-}
-
-//...................................................
-
-// @Description Defines the generic error
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-
-// @Description Defines the API response structure for /stats endpoint.
-type StatsResponse struct {
-	Total int `json:"total"`
-	Count int `json:"count"`
+	ctx     context.Context
+	Logger  *logrus.Entry
+	service *service.SubscriptionService
 }
 
 /*.....................................................................
@@ -69,8 +29,10 @@ type StatsResponse struct {
 
 // NewSubscriptionHandlers creates and returns a SubscriptionHandler instance with
 // With shared context, logger, and repository dependencies.
-func NewSubscriptionHandlers(ctx context.Context, handlerLogger *logrus.Entry, repo *repository.SubscriptionRepository) SubscriptionHandler {
-	return SubscriptionHandler{ctx: ctx, Logger: handlerLogger, SubRepository: repo}
+// NewSubscriptionHandlers создает и возвращает экземпляр SubscriptionHandler с
+// С зависимостями от общего контекста, логгера и репозитория.
+func NewSubscriptionHandlers(ctx context.Context, handlerLogger *logrus.Entry, serice *service.SubscriptionService) *SubscriptionHandler {
+	return &SubscriptionHandler{ctx: ctx, Logger: handlerLogger, service: serice}
 }
 
 // @tag.name Subscriptions
@@ -84,346 +46,270 @@ func NewSubscriptionHandlers(ctx context.Context, handlerLogger *logrus.Entry, r
 // @Tags Subscriptions
 // @Accept json
 // @Produce json
-// @Param subscription body createSubReq true "Subscription payload"
-// @Success 201 {object} SubscriptionResponse
-// @Failure 400 {object} ErrorResponse "Bad Request"
-// @Failure 500 {object} ErrorResponse "Internal Server Error"
+// @Param subscription body models.CreateSubscriptionRequest true "Subscription payload"
+// @Success 201 {object} models.SubscriptionResponse
+// @Failure 400 {object} models.ErrorResponse "Bad Request"
+// @Failure 500 {object} models.ErrorResponse "Internal Server Error"
 // @Router /subscriptions [post]
 func (h *SubscriptionHandler) CreateSubscription(c *gin.Context) {
 
-	var req createSubReq
+	var req *models.CreateSubscriptionRequest
 
 	// Bind and validate request payload
+	//Привяжите и проверьте полезную нагрузку запроса.
 	if err := c.ShouldBindJSON(&req); err != nil {
-		h.Logger.WithError(err).Warn("[-] invalid request payload in CreateSubscription")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid Inputs"})
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error()})
 		return
 	}
 
-	// Parse start_date (MM-YYYY)
-	startDate, err := validations.ValidateStartDate(req.StartDate, h.Logger)
+	h.Logger.Infof("creating subscription: ServiceName: %+v, UserID: %+v, Price: %+v,StartDate: %+v, EndDate: %+v", req.ServiceName, req.UserID, req.Price, req.StartDate, req.EndDate)
+
+	//Process business logic for create subscription request
+	//Обработка бизнес-логики для создания запроса на подписку
+	sub, err := h.service.CreateSubscription(c.Request.Context(), req)
+
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		h.handleServiceError(c, err)
 		return
 	}
 
-	// Parse optional end_date (MM-YYYY)
-	endDate, err := validations.ValidateEndDate(startDate, *req.EndDate, h.Logger)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	//Validate Price
-	if err := validations.ValidatePrice(req.Price, h.Logger); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	//Validate ServiceName
-	if err := validations.ValidateServiceName(req.ServiceName, h.Logger); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Build subscription model
-	sub := &models.Subscription{
-		ServiceName: req.ServiceName,
-		Price:       req.Price,
-		UserID:      req.UserID,
-		StartDate:   startDate,
-		EndDate:     endDate,
-	}
-
-	// Persist subscription to database
-	if err := h.SubRepository.CreateSubscription(h.ctx, sub); err != nil {
-		errMsg := "Failed to create subscription"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
-		return
-	}
-
-	// Convert model entity to API response format (MM-YYYY for dates) and
-	// Return the normalized subscription list to the client
-	res := ToResponse(sub)
-	c.JSON(http.StatusCreated, res)
+	c.JSON(http.StatusCreated, FormatToSubscriptionResponse(sub))
 }
 
-// ListSubscriptions returns all subscriptions in the system.
-// It converts internal date fields to MM-YYYY format
-// and responds with a normalized API payload.
+// ListSubscriptions retrieves paginated subscriptions with optional sorting and filtering
+// It converts internal date fields to MM-YYYY format and returns a paginated API response
 // ListSubscriptions godoc
-// @Summary List all subscriptions
-// @Description Retrieve all subscriptions
+// @Summary List subscriptions with pagination
+// @Description Retrieve paginated list of subscriptions with optional sorting
 // @Tags Subscriptions
+// @Accept json
 // @Produce json
-// @Success 200 {array} SubscriptionResponse
-// @Failure 500 {object} ErrorResponse "Internal Server Error"
+// @Param limit query int false "Maximum number of items to return" default(10) minimum(1) maximum(100)
+// @Param offset query int false "Number of items to skip" default(0) minimum(0)
+// @Param sort_by query string false "Field to sort by" default(id) Enums(id, user_id, service_name, price, start_date, end_date)
+// @Param order query string false "Sort order" default(desc) Enums(asc, desc)
+// @Success 200 {object} models.ListSubscriptionsResponse
+// @Failure 400 {object} models.ErrorResponse "Bad Request - Invalid query parameters"
+// @Failure 500 {object} models.ErrorResponse "Internal Server Error"
 // @Router /subscriptions [get]
 func (h *SubscriptionHandler) ListSubscriptions(c *gin.Context) {
-	// Fetch all subscriptions from the repository
-	subs, err := h.SubRepository.List(h.ctx)
+
+	var req *models.ListSubscriptionRequest
+
+	// Bind and validate request payload
+	//Привяжите и проверьте полезную нагрузку запроса.
+	if err := c.ShouldBindQuery(&req); err != nil {
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error()})
+		return
+	}
+	h.Logger.Infof("getting subscriptions:- Limit: %+v, Offset: %+v, SortBy: %+v, Order: %+v", req.Limit, req.Offset, req.SortBy, req.Order)
+
+	//process business logic for ListSubscriptionRequest
+	//Обработка бизнес-логики для ListSubscriptionRequest
+	total, subs, err := h.service.ListSubscriptions(h.ctx, req)
 	if err != nil {
-		errMsg := "Error Getting Subscriptions List"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
+		h.handleServiceError(c, err)
 		return
 	}
 
-	// Convert model entities to API response format (MM-YYYY for dates) and
-	// Return the normalized subscription list to the client
-	res := make([]SubscriptionResponse, len(subs))
+	// Convert each subscription model to API response format
+	// Преобразовать каждую модель подписки в формат ответа API
+	formatedSubs := make([]models.SubscriptionResponse, len(subs))
 	for i, sub := range subs {
-		res[i] = ToResponse(&sub)
+		formatedSubs[i] = FormatToSubscriptionResponse(&sub)
 	}
+
+	// Create pagination metadata for the response
+	// Создание метаданных для пагинации ответа
+	paginationMeta := &models.PaginationMeta{Limit: req.Limit, Offset: req.Offset, SortBy: req.SortBy, Order: req.Order, Total: total}
+
+	// Create a final response with subscription and pagination data
+	// Создать окончательный ответ с данными о подписке и постраничной навигации
+	res := &models.ListSubscriptionsResponse{Subscriptions: formatedSubs, Meta: paginationMeta}
 
 	c.JSON(http.StatusOK, res)
 
 }
 
 // GetSubscription retrieves a single subscription by its ID.
-// It validates the identifier and returns a formatted
-// subscription response if found.
+// It validates the identifier and returns a formatted subscription response if found.
 // GetSubscription godoc
 // @Summary Get subscription by ID
 // @Description Retrieve a subscription using its ID
 // @Tags Subscriptions
+// @Accept json
 // @Produce json
-// @Param id path int true "Subscription ID"
-// @Success 200 {object} SubscriptionResponse
-// @Failure 400 {object} ErrorResponse "Bad Request"
-// @Failure 404 {object} ErrorResponse "Not Found"
-// @Failure 500 {object} ErrorResponse "Internal Server Error"
+// @Param id path int true "Subscription ID" minimum(1)
+// @Success 200 {object} models.SubscriptionResponse
+// @Failure 400 {object} models.ErrorResponse "Bad Request - Invalid subscription ID"
+// @Failure 404 {object} models.ErrorResponse "Not Found - Subscription does not exist"
+// @Failure 500 {object} models.ErrorResponse "Internal Server Error"
 // @Router /subscriptions/{id} [get]
 func (h *SubscriptionHandler) GetSubscription(c *gin.Context) {
-	// Extract and validate the subscription ID from the URL path
-	id, err := validations.ValidateSubscriptionID(c.Param("id"), h.Logger)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+
+	var req *models.SubscriptionUriIDRequest
+
+	// Bind and validate request payload
+	//Привяжите и проверьте полезную нагрузку запроса.
+	if err := c.ShouldBindUri(&req); err != nil {
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error(),
+		})
 		return
 	}
 
-	// Retrieve the subscription by ID from the repository
-	sub, err := h.SubRepository.GetByID(h.ctx, uint(id))
+	h.Logger.Info("getting subscription by ID: ", req.ID)
+
+	//process business logic for GetSubscriptionRequest
+	//Обработка бизнес-логики для GetSubscription Request
+	sub, err := h.service.GetSubscription(h.ctx, req.ID)
 	if err != nil {
-		errMsg := "Error Fetching Data By Id"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
+		h.handleServiceError(c, err)
 		return
 	}
-	// Handle case where no subscription exists for the given ID
-	if sub == nil {
-		errMsg := "No Subscriptions For This ID"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
-		return
-	}
-	// Convert model entity to API response format and return it
-	res := ToResponse(sub)
-	c.JSON(http.StatusOK, res)
+
+	c.JSON(http.StatusOK, FormatToSubscriptionResponse(sub))
 
 }
 
 // UpdateSubscription updates an existing subscription by ID.
-// Only fields provided in the request are modified,
+// Only fields provided in the request are modified (partial update/PATCH-like),
 // with validation applied to price and date formats.
 // UpdateSubscription godoc
 // @Summary Update subscription
-// @Description Update subscription fields by ID
+// @Description Partially update subscription fields by ID (only provided fields are modified)
 // @Tags Subscriptions
 // @Accept json
 // @Produce json
-// @Param id path int true "Subscription ID"
-// @Param subscription body updateSubReq true "Update payload"
-// @Success 200 {object} SubscriptionResponse
-// @Failure 400 {object} ErrorResponse "Bad Request"
-// @Failure 404 {object} ErrorResponse "Not Found"
-// @Failure 500 {object} ErrorResponse "Internal Server Error"
+// @Param id path int true "Subscription ID" minimum(1)
+// @Param subscription body models.UpdateSubscriptionRequest true "Update payload (partial update)"
+// @Success 200 {object} models.SubscriptionResponse
+// @Failure 400 {object} models.ErrorResponse "Bad Request - Invalid input or validation failed"
+// @Failure 404 {object} models.ErrorResponse "Not Found - Subscription does not exist"
+// @Failure 500 {object} models.ErrorResponse "Internal Server Error"
 // @Router /subscriptions/{id} [put]
 func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
-	// Parse and validate subscription ID from URL path
-	id, err := validations.ValidateSubscriptionID(c.Param("id"), h.Logger)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+
+	var reqUri *models.SubscriptionUriIDRequest
+
+	// Bind and validate uri request payload
+	//Привязка и проверка полезной нагрузки запроса URI
+	if err := c.ShouldBindUri(&reqUri); err != nil {
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error(),
+		})
 		return
 	}
-
 	// Bind and validate update request payload.
-	var req updateSubReq
+	// Привязать и проверить полезную нагрузку запроса на обновление.
+	var req *models.UpdateSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errMsg := "Invalid Inputs"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error()})
 		return
 	}
 
-	// Fetch existing subscription to apply partial updates
-	sub, err := h.SubRepository.GetByID(h.ctx, uint(id))
+	h.Logger.Info("updating subscription:")
+
+	//process business logic for UpdateSubscriptionRequest
+	//Обработка бизнес-логики для GetSubscription Request
+	sub, err := h.service.UpdateSubscriptionByID(h.ctx, reqUri.ID, req)
 	if err != nil {
-		errMsg := "Error Getting Subscription ID"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
-		return
-	}
-	if sub == nil {
-		errMsg := "Subscription Not Found"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusNotFound, gin.H{"error": errMsg})
+		h.handleServiceError(c, err)
 		return
 	}
 
-	// Update service name if provided
-	if req.ServiceName != nil {
-		sub.ServiceName = *req.ServiceName
-	}
-
-	// Update price if provided and ensure it is non-negative
-	if req.Price != nil {
-		if err := validations.ValidatePrice(*req.Price, h.Logger); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		sub.Price = *req.Price
-	}
-	// Update start date if provided and validate format
-	if req.StartDate != nil {
-		startDate, err := validations.ValidateStartDate(*req.StartDate, h.Logger)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		sub.StartDate = startDate
-	}
-	// Update or clear end date and enforce end_date > start_date
-	if req.EndDate != nil {
-		if *req.EndDate == "" {
-			// Explicitly clear end_date
-			sub.EndDate = nil
-		} else {
-			endDate, err := validations.ValidateEndDate(sub.StartDate, *req.EndDate, h.Logger)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-
-			sub.EndDate = endDate
-		}
-	}
-
-	if err := h.SubRepository.Update(h.ctx, sub); err != nil {
-		errMsg := "update failed"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
-		return
-	}
-
-	// Return updated subscription in API response format
-	res := ToResponse(sub)
-	c.JSON(http.StatusOK, res)
+	c.JSON(http.StatusOK, FormatToSubscriptionResponse(sub))
 }
 
 // DeleteSubscription handles deleting a subscription by its ID.
 // It validates the ID parameter, calls the repository to delete the record,
-// logs any errors, and returns appropriate HTTP status codes:
+// logs any errors, and returns appropriate HTTP status codes.
 // DeleteSubscription godoc
 // @Summary Delete subscription
-// @Description Delete subscription by ID
+// @Description Permanently delete a subscription by ID
 // @Tags Subscriptions
-// @Param id path int true "Subscription ID"
-// @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse "Bad Request"
-// @Failure 500 {object} ErrorResponse "Internal Server Error"
+// @Accept json
+// @Produce json
+// @Param id path int true "Subscription ID" minimum(1)
+// @Success 204 "No Content - Subscription successfully deleted"
+// @Failure 400 {object} models.ErrorResponse "Bad Request - Invalid subscription ID"
+// @Failure 404 {object} models.ErrorResponse "Not Found - Subscription does not exist"
+// @Failure 500 {object} models.ErrorResponse "Internal Server Error"
 // @Router /subscriptions/{id} [delete]
 func (h *SubscriptionHandler) DeleteSubscription(c *gin.Context) {
-	// Validate the ID parameter; return 400 if not a positive integer
-	id, err := validations.ValidateSubscriptionID(c.Param("id"), h.Logger)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var req *models.SubscriptionUriIDRequest
+	// Bind and validate uri request payload
+	//Привязка и проверка полезной нагрузки запроса URI
+	if err := c.ShouldBindUri(&req); err != nil {
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error(),
+		})
 		return
 	}
 
-	// Call repository to delete the subscription; log and return 500 if an error occurs
-	if err := h.SubRepository.Delete(h.ctx, uint(id)); err != nil {
-		errMsg := "Failed To Delete The Subscription"
-		h.Logger.WithError(err).Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
+	h.Logger.Info("deleting subscription by ID: ", req.ID)
+
+	//process business logic for DeleteSubscriptionRequest
+	//Обработка бизнес-логики для DeleteSubscription Request
+	if err := h.service.DeleteSubscription(h.ctx, req.ID); err != nil {
+		h.handleServiceError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
-
 }
 
-// SumCostHandler calculates the total cost of subscriptions for a given user
+// GetUserSubscriptionSummary calculates subscription statistics for a given user
 // within an optional date range and optional service name filter.
-// It reads query parameters 'from' (start date,optional), 'to' (end date,optional), 'user_id' (required)
-// and 'service_name' (optional), validates them, and returns the total cost in JSON.
-// SumCostHandler godoc
-// @Summary Calculate total subscription cost
-// @Description Calculate total cost for a user within a period
+// Returns total cost, unique months, and subscription count.
+// GetUserSubscriptionSummary godoc
+// @Summary Get user subscription summary
+// @Description Calculate subscription statistics including total cost, unique months, and count for a user
 // @Tags Subscriptions
+// @Accept json
 // @Produce json
-// @Param user_id query string true "User UUID"
-// @Param from query string false "Start period (MM-YYYY)"
-// @Param to query string false "End period (MM-YYYY)"
-// @Param service_name query string false "Service name filter"
-// @Success 200 {object} StatsResponse "Response for static"
-// @Failure 400 {object} ErrorResponse "Bad Request"
-// @Failure 500 {object} ErrorResponse "Internal Server Error"
-// @Router /subscriptions/stats [get]
-func (h *SubscriptionHandler) SumCostHandler(c *gin.Context) {
-	// Read query parameters for filtering: from, to, subscription_name, and required user_id
-	startStr := c.Query("from")
-	endStr := c.Query("to")
-	serviceName := c.Query("service_name")
-	userID := c.Query("user_id")
+// @Param user_id query string true "User UUID" format(uuid)
+// @Param service_name query string true "Filter by service name"
+// @Param from query string false "Start date (MM-YYYY)"
+// @Param to query string false "End date (MM-YYYY)"
+// @Success 200 {object} models.UserSubscriptionSummaryResponse
+// @Failure 400 {object} models.ErrorResponse "Bad Request - Invalid parameters"
+// @Failure 500 {object} models.ErrorResponse "Internal Server Error"
+// @Router /subscriptions/summary [get]
+func (h *SubscriptionHandler) GetUserSubscriptionSummary(c *gin.Context) {
 
-	// Validate required user_id
-	if err := validations.ValidateUserID(userID, h.Logger); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var req *models.UserSubscriptionSummaryRequest
+
+	// Bind and validate request payload
+	//Привяжите и проверьте полезную нагрузку запроса.
+	if err := c.ShouldBindQuery(&req); err != nil {
+		h.Logger.WithError(err).Info(validations.ErrInvalidRequestInput)
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: validations.ErrInvalidRequestInput.Error(), Details: err.Error()})
 		return
 	}
 
-	// Parse 'from' date string to time.Time
-	periodStart, err := validations.ValidateStartDateSumCostHandler(startStr, h.Logger)
+	h.Logger.Infof("getting user's subscription summary: UserID: %+v, ServiceName: %+v, PeriodStart: %+v, PeriodEnd: %+v", req.UserID, req.ServiceName, req.From, req.To)
+
+	//process business logic for GetUserSubscriptionSummaryRequest
+	//Обработка бизнес-логики для GetUserSubscriptionSummaryRequest
+	unitPrice, totalAmount, totalMonths, err := h.service.GetUserSubscriptionSummary(h.ctx, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		h.handleServiceError(c, err)
 		return
 	}
 
-	// Parse 'to' date string to time.Time
-	periodEnd, err := validations.ValidateEndDateSumCostHandler(periodStart, endStr, h.Logger)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	res := &models.UserSubscriptionSummaryResponse{
+		UserID:      req.UserID,
+		ServiceName: req.ServiceName,
+		TotalMonths: totalMonths,
+		UnitPrice:   unitPrice,
+		TotalAmount: totalAmount,
 	}
+	c.JSON(http.StatusOK, res)
 
-	// Call repository to calculate the total cost for the period and filters
-	total, count, err := h.SubRepository.CalculateTotalCost(h.ctx, periodStart, periodEnd, userID, serviceName)
-	if err != nil {
-		errMsg := "Failed To Calculate TotalCost"
-		h.Logger.Error("[-] " + errMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"total": total, "count": count})
-
-}
-
-// ToResponse converts a Subscription model to a SubscriptionResponse DTO
-// formatting the StartDate and EndDate in "MM-YYYY" format.
-func ToResponse(sub *models.Subscription) SubscriptionResponse {
-	// prepare EndDate string; leave empty if EndDate is nil or zero
-	var end string
-	if sub.EndDate != nil && !sub.EndDate.IsZero() {
-		end = utils.FormatMonthYear(*sub.EndDate)
-	}
-	// return response object with formatted dates
-	return SubscriptionResponse{
-		ID:          int(sub.ID),
-		ServiceName: sub.ServiceName,
-		Price:       sub.Price,
-		UserID:      sub.UserID,
-		StartDate:   utils.FormatMonthYear(sub.StartDate),
-		EndDate:     end,
-	}
 }

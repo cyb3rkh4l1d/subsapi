@@ -3,15 +3,28 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/cyb3rkh4l1d/subsapi/internal/models"
+	"github.com/cyb3rkh4l1d/subsapi/internal/validations"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
+// Repository defines data access operations for subscription management
+// Репозиторий определяет операции доступа к данным для управления подписками
+type Repository interface {
+	CreateSubscription(ctx context.Context, sub *models.Subscription) error
+	GetSubscriptionByID(ctx context.Context, id uint) (*models.Subscription, error)
+	ListSubscription(ctx context.Context, req *models.ListSubscriptionRequest) (int64, []models.Subscription, error)
+	UpdateSubscriptionByID(ctx context.Context, sub *models.Subscription) error
+	DeleteSubscriptionByID(ctx context.Context, id uint) error
+	FindSubscriptionsByUserIDandServiceName(ctx context.Context, userID string, serviceName string) ([]models.Subscription, error)
+}
+
 // SubscriptionRepository manages CRUD operations for subscriptions.
 // It uses GORM for database access and Logrus for logging.
+// SubscriptionRepository управляет операциями CRUD для подписок.
+// Он использует GORM для доступа к базе данных и Logrus для ведения журналов.
 type SubscriptionRepository struct {
 	DB     *gorm.DB
 	Logger *logrus.Entry
@@ -25,6 +38,7 @@ type SubscriptionRepository struct {
 ........................................................................
 */
 // NewSubscriptionRepository initializes a new repository instance.
+// NewSubscriptionRepository инициализирует новый экземпляр репозитория.
 func NewSubscriptionRepository(db *gorm.DB, logger *logrus.Entry) *SubscriptionRepository {
 	return &SubscriptionRepository{
 		DB:     db,
@@ -33,103 +47,95 @@ func NewSubscriptionRepository(db *gorm.DB, logger *logrus.Entry) *SubscriptionR
 }
 
 // CreateSubscription inserts a new subscription into the database.
+// Функция CreateSubscription вставляет новую подписку в базу данных.
 func (r *SubscriptionRepository) CreateSubscription(ctx context.Context, sub *models.Subscription) error {
-	r.Logger.WithFields(logrus.Fields{
-		"user_id": sub.UserID,
-		"service": sub.ServiceName,
-	}).Info("Creating subscription")
-
 	result := r.DB.WithContext(ctx).Create(sub)
 
 	if result.Error != nil {
-		r.Logger.WithError(result.Error).Error("[-] failed to create subscription")
+		r.Logger.WithError(result.Error).Error(validations.ErrCreateSubscriptionFailed)
+		return validations.ErrCreateSubscriptionFailed
 	}
 
-	return result.Error
+	r.Logger.Info("subscription has been created:", *sub)
+	return nil
 }
 
-// GetByID retrieves a subscription by its ID.
-func (r *SubscriptionRepository) GetByID(ctx context.Context, id uint) (*models.Subscription, error) {
+// GetSubscriptionByID retrieves a subscription by its ID.
+// Функция GetBGetSubscriptionByIDyID извлекает подписку по ее идентификатору.
+func (r *SubscriptionRepository) GetSubscriptionByID(ctx context.Context, id uint) (*models.Subscription, error) {
 	var sub models.Subscription
 	if err := r.DB.WithContext(ctx).First(&sub, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		r.Logger.Errorf("[-] GetByID error: %v", err)
-		return nil, err
+		r.Logger.WithError(err).Error(validations.ErrGetSubscriptionByIDFailed)
+		return nil, validations.ErrGetSubscriptionByIDFailed
 	}
+	r.Logger.Infof("subscription %+v has been fetched successfully: ", sub.ID)
 	return &sub, nil
 }
 
-// List fetches all subscriptions.
-func (r *SubscriptionRepository) List(ctx context.Context) ([]models.Subscription, error) {
+// ListSubscription fetches all subscriptions.
+// ListSubscription получает все подписки.
+func (r *SubscriptionRepository) ListSubscription(ctx context.Context, req *models.ListSubscriptionRequest) (int64, []models.Subscription, error) {
+	var total int64
 	var subs []models.Subscription
-	if err := r.DB.WithContext(ctx).Find(&subs).Error; err != nil {
-		r.Logger.Errorf("[-] List error: %v", err)
+	orderClause := req.SortBy + " " + req.Order
+
+	// count all subscriptions
+	// подсчитать все подписки
+	if err := r.DB.WithContext(ctx).Model(&models.Subscription{}).Count(&total).Error; err != nil {
+		r.Logger.WithError(err).Error(validations.ErrListSubscriptionFailed)
+		return total, nil, validations.ErrListSubscriptionFailed
+	}
+
+	//retrieves user's subscriptions with filtering, pagination, and sorting
+	//Получает подписки пользователей с фильтрацией, пагинацией и сортировкой.
+	if err := r.DB.WithContext(ctx).Limit(req.Limit).Offset(req.Offset).Order(orderClause).Find(&subs).Error; err != nil {
+		r.Logger.WithError(err).Error(validations.ErrListSubscriptionFailed)
+		return total, nil, validations.ErrListSubscriptionFailed
+	}
+	return total, subs, nil
+}
+
+// UpdateSubscription updates given subscription by its ID
+// Функция UpdateSubscription обновляет указанную подписку по ее идентификатору.
+func (r *SubscriptionRepository) UpdateSubscriptionByID(ctx context.Context, sub *models.Subscription) error {
+	if err := r.DB.WithContext(ctx).Save(sub).Error; err != nil {
+		r.Logger.WithError(err).Error(validations.ErrUpdateSubscriptionFailed)
+		return validations.ErrUpdateSubscriptionFailed
+	}
+	r.Logger.Infof("subscription %+v has been updated successfully: ", sub.ID)
+	return nil
+}
+
+// DeleteSubscription removes a subscription by ID.
+// Функция DeleteSubscription удаляет подписку по ID.
+func (r *SubscriptionRepository) DeleteSubscriptionByID(ctx context.Context, id uint) error {
+	if err := r.DB.WithContext(ctx).Delete(&models.Subscription{}, id).Error; err != nil {
+		r.Logger.WithError(err).Error(validations.ErrDeleteSubscriptionFailed)
+		return validations.ErrDeleteSubscriptionFailed
+	}
+	r.Logger.Infof("subscription %+v has been deleted: ", id)
+	return nil
+}
+
+// FindSubscriptionsByUserIDandServiceName Get subscriptions filtered by user and service_name
+// FindSubscriptionsByUserIDandServiceName Получает подписки, отфильтрованные по пользователю и имени сервиса.
+func (r *SubscriptionRepository) FindSubscriptionsByUserIDandServiceName(
+	ctx context.Context,
+	userID string,
+	serviceName string,
+) ([]models.Subscription, error) {
+	query := r.DB.WithContext(ctx).Model(&models.Subscription{}).
+		Where("user_id = ? AND service_name = ?", userID, serviceName)
+
+	var subscriptions []models.Subscription
+	if err := query.Find(&subscriptions).Error; err != nil {
+		r.Logger.WithError(err).Error(validations.ErrFindSubscriptionByPeriodFailed)
 		return nil, err
 	}
-	return subs, nil
-}
 
-// Update saves changes to a subscription.
-func (r *SubscriptionRepository) Update(ctx context.Context, sub *models.Subscription) error {
-	if err := r.DB.WithContext(ctx).Save(sub).Error; err != nil {
-		r.Logger.Errorf("[-] Update error: %v", err)
-		return err
-	}
-	return nil
-}
-
-// Delete removes a subscription by ID.
-func (r *SubscriptionRepository) Delete(ctx context.Context, id uint) error {
-	if err := r.DB.WithContext(ctx).Delete(&models.Subscription{}, id).Error; err != nil {
-		r.Logger.Errorf("[-] Delete error: %v", err)
-		return err
-	}
-	return nil
-}
-
-// CalculateTotalCost calculates total subscription cost and count for a user.
-// Optionally filters by service name and start date range.
-func (r *SubscriptionRepository) CalculateTotalCost(
-	ctx context.Context,
-	periodStart, periodEnd time.Time,
-	userID, serviceName string,
-) (int64, int64, error) {
-	var totalCost, count int64
-
-	// Build base query and arguments
-	query := `
-    SELECT 
-        COALESCE(SUM(price), 0),
-        COUNT(*)
-    FROM subscriptions
-    WHERE user_id = ?
-    `
-	args := []interface{}{userID}
-
-	// Optional service name filter
-	if serviceName != "" {
-		query += " AND service_name = ?"
-		args = append(args, serviceName)
-	}
-
-	// Optional date filters on start_date
-	if !periodStart.IsZero() {
-		query += " AND start_date >= ?"
-		args = append(args, periodStart)
-	}
-	if !periodEnd.IsZero() {
-		query += " AND start_date <= ?"
-		args = append(args, periodEnd)
-	}
-
-	// Use GORM's Row() and Scan
-	row := r.DB.WithContext(ctx).Raw(query, args...).Row()
-	err := row.Scan(&totalCost, &count)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	return totalCost, count, nil
+	r.Logger.Infof("subscriptions for user %+v has been fetched: %+v", userID, subscriptions)
+	return subscriptions, nil
 }
