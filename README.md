@@ -64,7 +64,7 @@ GET    /api/v1/subscriptions/{id}    Get subscription by ID
 PUT    /api/v1/subscriptions/{id}    Update subscription by ID
 DELETE /api/v1/subscriptions/{id}    Delete subscription by ID
 GET    /api/v1/subscriptions/summary?user_id=&service_name=&from=&to=     Calculate total subscription cost for a user
-GET    /api/swagger/index.html            Swagger API documentation
+GET    /api/v1/swagger/index.html            Swagger API documentation
 ```
 
 Visit Swagger Docs endpoints
