@@ -108,7 +108,7 @@ func (h *SubscriptionHandler) ListSubscriptions(c *gin.Context) {
 
 	//process business logic for ListSubscriptionRequest
 	//Обработка бизнес-логики для ListSubscriptionRequest
-	total, subs, err := h.service.ListSubscriptions(h.ctx, req)
+	total, subs, err := h.service.ListSubscriptions(c.Request.Context(), req)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -165,7 +165,7 @@ func (h *SubscriptionHandler) GetSubscription(c *gin.Context) {
 
 	//process business logic for GetSubscriptionRequest
 	//Обработка бизнес-логики для GetSubscription Request
-	sub, err := h.service.GetSubscription(h.ctx, req.ID)
+	sub, err := h.service.GetSubscription(c.Request.Context(), req.ID)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -217,7 +217,7 @@ func (h *SubscriptionHandler) UpdateSubscription(c *gin.Context) {
 
 	//process business logic for UpdateSubscriptionRequest
 	//Обработка бизнес-логики для GetSubscription Request
-	sub, err := h.service.UpdateSubscriptionByID(h.ctx, reqUri.ID, req)
+	sub, err := h.service.UpdateSubscriptionByID(c.Request.Context(), reqUri.ID, req)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -257,7 +257,7 @@ func (h *SubscriptionHandler) DeleteSubscription(c *gin.Context) {
 
 	//process business logic for DeleteSubscriptionRequest
 	//Обработка бизнес-логики для DeleteSubscription Request
-	if err := h.service.DeleteSubscription(h.ctx, req.ID); err != nil {
+	if err := h.service.DeleteSubscription(c.Request.Context(), req.ID); err != nil {
 		h.handleServiceError(c, err)
 		return
 	}
@@ -297,7 +297,7 @@ func (h *SubscriptionHandler) GetUserSubscriptionSummary(c *gin.Context) {
 
 	//process business logic for GetUserSubscriptionSummaryRequest
 	//Обработка бизнес-логики для GetUserSubscriptionSummaryRequest
-	unitPrice, totalAmount, totalMonths, err := h.service.GetUserSubscriptionSummary(h.ctx, req)
+	unitPrice, totalAmount, totalMonths, err := h.service.GetUserSubscriptionSummary(c.Request.Context(), req)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
