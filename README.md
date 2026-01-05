@@ -12,7 +12,12 @@ SubsAPI is a subscription management API built with Go (Golang), Gin, and GORM, 
 - Dockerized for easy setup
 
 
-# API Endpoints
+# Architecture / Design 
+
+![arch flow](./api/res/arch-flow.png)
+
+
+![process diagram](./api/res/process-diagram.png)
 # Deployment
 
 1. Clone the repository:
@@ -44,9 +49,12 @@ DB_PASSWORD=admin
 DB_NAME=subscriptions_db
 DB_SSLMODE=disable
 GIN_MODE=release
+LOG_LEVEL=info
 
 
 ```
+
+LOG_LEVEL can be info,warn,fatal,error, debug
 
 4. Start the application using Docker Compose:
 
